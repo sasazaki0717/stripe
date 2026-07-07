@@ -15,11 +15,39 @@ export default defineEventHandler(async (event) => {
 
   const stripe = new Stripe(secretKey)
 
+  const products = {
+    'sample-monthly': {
+      name: 'Nuxt × Stripe 学習プラン（月額）',
+      amount: 1000,
+      currency: 'jpy'
+    },
+    'sample-yearly': {
+      name: 'Nuxt × Stripe 学習プラン（年額）',
+      amount: 10000,
+      currency: 'jpy'
+    }
+  }
+
+  const product = products[body.productId]
+
+  if (!product) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid productId.'
+    })
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
     line_items: [
       {
-        price: body.priceId,
+        price_data: {
+          currency: product.currency,
+          product_data: {
+            name: product.name
+          },
+          unit_amount: product.amount
+        },
         quantity: 1
       }
     ],
@@ -28,6 +56,7 @@ export default defineEventHandler(async (event) => {
   })
 
   return {
-    sessionId: session.id
+    sessionId: session.id,
+    url: session.url
   }
 })
