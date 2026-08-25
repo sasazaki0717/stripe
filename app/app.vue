@@ -67,6 +67,7 @@ const checkoutLoading = ref<string | null>(null)
 const statusLoading = ref(false)
 const statusMessage = ref('')
 const selectedPlanId = ref<string | null>(null)
+const SUCCESS_STORAGE_KEY = 'stripe-demo-success'
 
 function planNameFromProductId(productId: string | null): string {
   if (!productId) return '未設定'
@@ -109,9 +110,22 @@ async function rememberSelectedPlan(productId: string) {
 
 async function loadStatus() {
   statusLoading.value = true
+  const successWasCompleted = typeof window !== 'undefined' && window.localStorage.getItem(SUCCESS_STORAGE_KEY) === 'true'
 
   try {
-    const data = await $fetch<{ state: StatusState; subscription: { planName?: string; currentPeriodEnd?: number } | null; updatedAt?: string }>('/api/subscription/status')
+    if (successWasCompleted && selectedPlanId.value) {
+      status.value = {
+        label: '契約中',
+        text: `${planNameFromProductId(selectedPlanId.value)}を契約中です。`,
+        tone: 'active'
+      }
+      subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
+      periodText.value = '購入完了'
+      updatedAt.value = new Date().toLocaleString('ja-JP')
+      return
+    }
+
+    const data = await $fetch<{ state: StatusState; subscription: { planName?: string; currentPeriodEnd?: number } | null; updatedAt?: string }>(`/api/subscription/status?plan=${selectedPlanId.value ?? ''}`)
     status.value = data.state
     subscriptionPlanName.value = data.subscription?.planName || planNameFromProductId(selectedPlanId.value)
     periodText.value = data.subscription?.currentPeriodEnd
@@ -146,12 +160,26 @@ onMounted(() => {
   }
 
   if (route.query.success === 'true') {
-    statusMessage.value = '決済が完了しました。契約状態を再読込しています。'
+    if (selectedPlanId.value) {
+      status.value = {
+        label: '契約中',
+        text: `${planNameFromProductId(selectedPlanId.value)}を契約中です。`,
+        tone: 'active'
+      }
+      subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
+      periodText.value = '購入完了'
+      updatedAt.value = new Date().toLocaleString('ja-JP')
+    }
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SUCCESS_STORAGE_KEY, 'true')
+    }
+
+    statusMessage.value = '決済が完了しました。'
     router.replace({ path: '/', query: {} })
   }
 
   loadStatus()
-
   if (route.query.canceled) {
     statusMessage.value = '決済がキャンセルされました。'
     router.replace({ path: '/', query: {} })
@@ -166,6 +194,9 @@ async function checkout(product: (typeof products)[number]) {
 
   checkoutLoading.value = product.id
   rememberSelectedPlan(product.id)
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(SUCCESS_STORAGE_KEY)
+  }
   statusMessage.value = ''
 
   try {

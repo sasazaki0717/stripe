@@ -6,10 +6,8 @@ const getPlanNameFromId = (priceId?: string | null) => {
   if (!priceId) return '未設定'
 
   switch (priceId) {
-    case 'sample-monthly':
     case 'price_demo_monthly':
       return '月額プラン'
-    case 'sample-yearly':
     case 'price_demo_yearly':
       return '年額プラン'
     default:
@@ -17,8 +15,11 @@ const getPlanNameFromId = (priceId?: string | null) => {
   }
 }
 
-export default defineEventHandler(async () => {
-  const user = await prisma.user.findFirst({
+export default defineEventHandler(async (event) => {
+  const query = getQuery(event)
+  const selectedPlanId = typeof query.plan === 'string' ? query.plan : null
+
+  let user = await prisma.user.findFirst({
     orderBy: { createdAt: 'desc' },
     include: {
       subscription: true,
@@ -29,6 +30,14 @@ export default defineEventHandler(async () => {
     }
   })
 
+  const defaultInactiveState = {
+    label: '未契約',
+    text: selectedPlanId
+      ? `${getPlanNameFromId(selectedPlanId === 'sample-monthly' ? 'price_demo_monthly' : 'price_demo_yearly')}を選択中です。購入完了時に契約状態が更新されます。`
+      : '現在の契約はありません。購入または契約を行ってください。',
+    tone: 'inactive' as const
+  }
+
   if (!user || !user.subscription) {
     return {
       user: user ? {
@@ -36,13 +45,18 @@ export default defineEventHandler(async () => {
         email: user.email,
         name: user.name
       } : null,
-      subscription: null,
+      subscription: selectedPlanId
+        ? {
+            status: 'inactive',
+            planName: getPlanNameFromId(selectedPlanId === 'sample-monthly' ? 'price_demo_monthly' : 'price_demo_yearly'),
+            stripePriceId: selectedPlanId === 'sample-monthly' ? 'price_demo_monthly' : 'price_demo_yearly',
+            currentPeriodStart: null,
+            currentPeriodEnd: null,
+            cancelAtPeriodEnd: false
+          }
+        : null,
       lastPurchase: null,
-      state: {
-        label: '未契約',
-        text: '現在の契約はありません。購入または契約を行ってください。',
-        tone: 'inactive'
-      },
+      state: defaultInactiveState,
       updatedAt: new Date().toISOString()
     }
   }

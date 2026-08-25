@@ -19,14 +19,12 @@ export default defineEventHandler(async (event) => {
     'sample-monthly': {
       name: 'Nuxt × Stripe 学習プラン（月額）',
       amount: 1000,
-      currency: 'jpy',
-      interval: 'month' as const
+      currency: 'jpy'
     },
     'sample-yearly': {
       name: 'Nuxt × Stripe 学習プラン（年額）',
       amount: 10000,
-      currency: 'jpy',
-      interval: 'year' as const
+      currency: 'jpy'
     }
   }
 
@@ -40,14 +38,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
+    mode: 'payment',
     line_items: [
       {
         price_data: {
           currency: product.currency,
-          recurring: {
-            interval: product.interval
-          },
           product_data: {
             name: product.name
           },
@@ -56,10 +51,6 @@ export default defineEventHandler(async (event) => {
         quantity: 1
       }
     ],
-    metadata: {
-      productId: body.productId,
-      planName: product.name
-    },
     success_url: `${getRequestURL(event).origin}/?success=true`,
     cancel_url: `${getRequestURL(event).origin}/?canceled=true`
   })
