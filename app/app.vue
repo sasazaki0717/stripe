@@ -4,9 +4,22 @@
       <p class="eyebrow">Stripe Demo</p>
       <h1>Nuxt × Stripe 学習用ページ</h1>
       <p class="lead">
-        ボタンを押すと Stripe Checkout に遷移します。テスト用キーを `.env` に設定済みである前提です。
+        現在の契約状態と購入状態を確認できます。Stripe の決済結果とローカル DB の状態を同時に見られるようにしています。
       </p>
     </section>
+
+    <ContractStatusCard
+      :status="{
+        label: status.label,
+        text: status.text,
+        tone: status.tone,
+        planName: subscriptionPlanName,
+        periodText,
+        updatedAt
+      }"
+      :loading="statusLoading"
+      @refresh="loadStatus"
+    />
 
     <section class="status-card" v-if="statusMessage">
       <p>{{ statusMessage }}</p>
@@ -21,8 +34,8 @@
         </div>
         <div class="product-footer">
           <strong>{{ product.price }}</strong>
-          <button :disabled="loading === product.id" @click="checkout(product)">
-            {{ loading === product.id ? '処理中...' : 'Checkout に移動' }}
+          <button :disabled="checkoutLoading === product.id" @click="checkout(product)">
+            {{ checkoutLoading === product.id ? '処理中...' : 'Checkout に移動' }}
           </button>
         </div>
       </article>
@@ -31,6 +44,8 @@
 </template>
 
 <script setup lang="ts">
+import ContractStatusCard from '../components/subscription/ContractStatusCard.vue'
+
 const runtimeConfig = useRuntimeConfig()
 const route = useRoute()
 const router = useRouter()
@@ -52,16 +67,125 @@ const products = [
   }
 ]
 
-const loading = ref<string | null>(null)
+const checkoutLoading = ref<string | null>(null)
+const statusLoading = ref(false)
 const statusMessage = ref('')
+const selectedPlanId = ref<string | null>(null)
+const SUCCESS_STORAGE_KEY = 'stripe-demo-success'
+
+function planNameFromProductId(productId: string | null): string {
+  if (!productId) return '未設定'
+
+  switch (productId) {
+    case 'sample-monthly':
+      return '月額プラン'
+    case 'sample-yearly':
+      return '年額プラン'
+    default:
+      return '未設定'
+  }
+}
+
+interface StatusState {
+  label: string
+  text: string
+  tone: 'active' | 'inactive' | 'warning'
+}
+
+const status = ref<StatusState>({
+  label: '確認中',
+  text: '契約状態を読み込みしています...',
+  tone: 'inactive'
+})
+const subscriptionPlanName = ref('未設定')
+const periodText = ref('')
+const updatedAt = ref('')
+
+const STORAGE_KEY = 'stripe-demo-selected-plan'
+
+async function rememberSelectedPlan(productId: string) {
+  selectedPlanId.value = productId
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, productId)
+  }
+
+  await loadStatus()
+}
+
+async function loadStatus() {
+  statusLoading.value = true
+  const successWasCompleted = typeof window !== 'undefined' && window.localStorage.getItem(SUCCESS_STORAGE_KEY) === 'true'
+
+  try {
+    if (successWasCompleted && selectedPlanId.value) {
+      status.value = {
+        label: '契約中',
+        text: `${planNameFromProductId(selectedPlanId.value)}の購入が完了しています。現在、契約中です。`,
+        tone: 'active'
+      }
+      subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
+      periodText.value = '購入完了'
+      updatedAt.value = new Date().toLocaleString('ja-JP')
+      return
+    }
+
+    const data = await $fetch<{ state: StatusState; subscription: { planName?: string; currentPeriodEnd?: number } | null; updatedAt?: string }>(`/api/subscription/status?plan=${selectedPlanId.value ?? ''}`)
+    status.value = data.state
+    subscriptionPlanName.value = data.subscription?.planName || planNameFromProductId(selectedPlanId.value)
+    periodText.value = data.subscription?.currentPeriodEnd
+      ? new Date(data.subscription.currentPeriodEnd * 1000).toLocaleString('ja-JP', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        })
+      : '未設定'
+    updatedAt.value = data.updatedAt ? new Date(data.updatedAt).toLocaleString('ja-JP') : '不明'
+  } catch (error) {
+    console.error(error)
+    status.value = {
+      label: 'エラー',
+      text: '契約状態の取得に失敗しました。サーバー側を確認してください。',
+      tone: 'warning'
+    }
+  } finally {
+    statusLoading.value = false
+  }
+}
 
 onMounted(() => {
-  if (route.query.success) {
-    statusMessage.value = '決済が完了しました。おつかれさまです！'
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem(STORAGE_KEY)
+    if (saved === 'sample-monthly' || saved === 'sample-yearly') {
+      selectedPlanId.value = saved
+    } else {
+      selectedPlanId.value = null
+      window.localStorage.removeItem(STORAGE_KEY)
+    }
+  }
+
+  if (route.query.success === 'true') {
+    if (selectedPlanId.value) {
+      status.value = {
+        label: '契約中',
+        text: `${planNameFromProductId(selectedPlanId.value)}の購入が完了しました。現在、契約中です。`,
+        tone: 'active'
+      }
+      subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
+      periodText.value = '購入完了'
+      updatedAt.value = new Date().toLocaleString('ja-JP')
+    }
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SUCCESS_STORAGE_KEY, 'true')
+    }
+
+    statusMessage.value = '決済が完了しました。'
     router.replace({ path: '/', query: {} })
   }
+
+  loadStatus()
   if (route.query.canceled) {
-    statusMessage.value = '決済がキャンセルされました。もう一度お試しください。'
+    statusMessage.value = '決済がキャンセルされました。'
     router.replace({ path: '/', query: {} })
   }
 })
@@ -72,7 +196,11 @@ async function checkout(product: (typeof products)[number]) {
     return
   }
 
-  loading.value = product.id
+  checkoutLoading.value = product.id
+  rememberSelectedPlan(product.id)
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(SUCCESS_STORAGE_KEY)
+  }
   statusMessage.value = ''
 
   try {
@@ -92,7 +220,7 @@ async function checkout(product: (typeof products)[number]) {
     console.error(error)
     statusMessage.value = 'Checkout セッションの作成に失敗しました。コンソールを確認してください。'
   } finally {
-    loading.value = null
+    checkoutLoading.value = null
   }
 }
 </script>
@@ -100,8 +228,9 @@ async function checkout(product: (typeof products)[number]) {
 <style scoped>
 .page-shell {
   min-height: 100vh;
-  background: linear-gradient(180deg, #edf2ff 0%, #ffffff 100%);
-  padding: 32px;
+  background: #f8fafc;
+  padding: 32px 20px;
+  color: #0f172a;
 }
 
 .hero-card,
@@ -109,31 +238,32 @@ async function checkout(product: (typeof products)[number]) {
 .status-card {
   max-width: 900px;
   margin: 0 auto 20px;
-  padding: 28px;
-  border-radius: 20px;
+  padding: 24px 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
   background: #ffffff;
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .eyebrow {
-  margin: 0 0 12px;
-  font-size: 0.8rem;
-  letter-spacing: 0.18em;
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #4f46e5;
-  font-weight: 800;
+  color: #64748b;
+  font-weight: 700;
 }
 
 h1 {
   margin: 0;
-  font-size: 2rem;
+  font-size: clamp(1.9rem, 3vw, 2.5rem);
   line-height: 1.2;
 }
 
 .lead {
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   color: #475569;
-  line-height: 1.75;
+  line-height: 1.7;
 }
 
 .product-grid {
@@ -150,13 +280,13 @@ h1 {
 
 .product-category {
   margin: 0 0 8px;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #64748b;
 }
 
 .product-card h2 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.2rem;
 }
 
 .product-description {
@@ -177,12 +307,12 @@ h1 {
 }
 
 button {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 999px;
-  background-color: #111827;
-  color: white;
-  font-weight: 700;
+  padding: 11px 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #ffffff;
+  font-weight: 600;
   cursor: pointer;
 }
 
