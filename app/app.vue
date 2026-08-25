@@ -1,11 +1,7 @@
 <template>
   <main class="page-shell">
     <section class="hero-card">
-      <p class="eyebrow">Stripe Demo</p>
-      <h1>Nuxt × Stripe 学習用ページ</h1>
-      <p class="lead">
-        現在の契約状態と購入状態を確認できます。Stripe の決済結果とローカル DB の状態を同時に見られるようにしています。
-      </p>
+      <h1>Stripe 学習用</h1>
     </section>
 
     <ContractStatusCard
@@ -120,7 +116,7 @@ async function loadStatus() {
     if (successWasCompleted && selectedPlanId.value) {
       status.value = {
         label: '契約中',
-        text: `${planNameFromProductId(selectedPlanId.value)}の購入が完了しています。現在、契約中です。`,
+        text: `${planNameFromProductId(selectedPlanId.value)}を契約中です。`,
         tone: 'active'
       }
       subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
@@ -167,7 +163,7 @@ onMounted(() => {
     if (selectedPlanId.value) {
       status.value = {
         label: '契約中',
-        text: `${planNameFromProductId(selectedPlanId.value)}の購入が完了しました。現在、契約中です。`,
+        text: `${planNameFromProductId(selectedPlanId.value)}を契約中です。`,
         tone: 'active'
       }
       subscriptionPlanName.value = planNameFromProductId(selectedPlanId.value)
